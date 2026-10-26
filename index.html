@@ -59,9 +59,9 @@
       selfie: "images/selfie.png",
       kampus: "images/kampus.webp",
     };
-    const IDLE_SECONDS = 45;   // diam berapa detik sebelum Rina mulai duluan
-    const MAX_NUDGES = 2;      // maksimal Rina mulai duluan berturut-turut
-    // =======================================
+    const IDLE_MIN = 60;   // detik, paling cepat Rina mulai duluan
+    const IDLE_MAX = 150;  // detik, paling lama
+    const MAX_NUDGES = 1;  // maksimal Rina mulai duluan berturut-turut
 
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
@@ -74,6 +74,13 @@
     let nudges = 0;
 
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    // Waktu balas acak: kadang cepat, kadang sedang, kadang lama
+    function randomDelay() {
+      const r = Math.random();
+      if (r < 0.55) return 800 + Math.random() * 2200;    // 55% cepat: 0,8-3 detik
+      if (r < 0.90) return 3000 + Math.random() * 7000;   // 35% sedang: 3-10 detik
+      return 10000 + Math.random() * 15000;               // 10% lama: 10-25 detik
+    }
     const nowTime = () => new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 
     function scrollDown() { chat.scrollTop = chat.scrollHeight; }
@@ -123,51 +130,58 @@
       }
     }
 
-    async function askAI() {
-      busy = true;
-      sendBtn.disabled = true;
-      clearTimeout(idleTimer);
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: history }),
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-        history.push({ role: "assistant", content: data.reply });
-        await showReply(data.reply);
-      } catch (e) {
-        history.pop(); // buang pesan terakhir yang gagal
-        const err = document.createElement("div");
-        err.className = "error";
-        err.textContent = "Error: " + e.message.slice(0, 150);
-        chat.appendChild(err);
-        scrollDown();
-      }
-      busy = false;
-      sendBtn.disabled = false;
-      startIdleTimer();
-    }
+   async function askAI(skipDelay = false) {
+  busy = true;
+  sendBtn.disabled = true;
+  clearTimeout(idleTimer);
+  const started = Date.now();
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages: history }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    history.push({ role: "assistant", content: data.reply });
 
-    // Pesan tersembunyi: user tidak melihatnya, hanya AI
-    function hiddenPrompt(text) {
-      history.push({ role: "user", content: "[SISTEM: " + text + "]" });
-      return askAI();
+    // tunggu sisa waktu acak (waktu fetch dihitung sebagai bagian dari jeda)
+    if (!skipDelay) {
+      const wait = Math.max(0, randomDelay() - (Date.now() - started));
+      await sleep(wait);
     }
+    await showReply(data.reply);
+  } catch (e) {
+    history.pop();
+    const err = document.createElement("div");
+    err.className = "error";
+    err.textContent = "Error: " + e.message.slice(0, 150);
+    chat.appendChild(err);
+    scrollDown();
+  }
+  busy = false;
+  sendBtn.disabled = false;
+  startIdleTimer();
+}
 
-    function startIdleTimer() {
-      clearTimeout(idleTimer);
-      if (nudges >= MAX_NUDGES) return;
-      idleTimer = setTimeout(() => {
-        if (busy || input.value.trim()) return startIdleTimer();
-        nudges++;
-        hiddenPrompt(
-          "User diam sekitar " + IDLE_SECONDS + " detik. Kamu mulai duluan: tanya sesuatu, cerita hal kecil dari harimu, atau ganti topik. Singkat, natural, jangan menyebut bahwa dia diam."
-        );
-      }, IDLE_SECONDS * 1000);
-    }
+// Pesan tersembunyi: user tidak melihatnya, hanya AI
+function hiddenPrompt(text, skipDelay = false) {
+  history.push({ role: "user", content: "[SISTEM: " + text + "]" });
+  return askAI(skipDelay);
+}
 
+function startIdleTimer() {
+  clearTimeout(idleTimer);
+  if (nudges >= MAX_NUDGES) return;
+  const seconds = IDLE_MIN + Math.random() * (IDLE_MAX - IDLE_MIN);
+  idleTimer = setTimeout(() => {
+    if (busy || input.value.trim()) return startIdleTimer();
+    nudges++;
+    hiddenPrompt(
+      "User sudah lama tidak membalas. Kalau topik tadi masih menggantung, lanjutkan topik itu dengan satu pesan pendek (misal nanya kabar atau 'eh kok diem'). Kalau topik sudah selesai, boleh buka topik baru yang ringan. Jangan menyebut kata 'diam' atau 'sistem'."
+    );
+  }, seconds * 1000);
+}
     async function sendMessage() {
       const text = input.value.trim();
       if (!text || busy) return;
@@ -183,7 +197,7 @@
     input.addEventListener("input", () => { if (!busy) startIdleTimer(); });
 
     // Rina menyapa duluan saat website dibuka
-    hiddenPrompt("User baru saja membuka chat denganmu. Sapa duluan dengan gayamu, singkat, lalu tanya sesuatu.");
+    hiddenPrompt("User baru saja membuka chat denganmu. Sapa duluan dengan gayamu, singkat, tanpa pertanyaan panjang.", true);
   </script>
 </body>
 </html>
