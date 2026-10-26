@@ -5,48 +5,128 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Chat dengan Rina</title>
   <style>
-    body { font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 16px; }
-    #chat { height: 70vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 10px; }
-    .msg { margin: 8px 0; padding: 8px 12px; border-radius: 12px; max-width: 80%; }
-    .user { background: #d0e8ff; margin-left: auto; }
-    .ai { background: #eee; }
-    #form { display: flex; gap: 8px; margin-top: 10px; }
-    #input { flex: 1; padding: 10px; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #e5ddd5; height: 100vh; display: flex; justify-content: center; }
+    .app { width: 100%; max-width: 480px; height: 100%; display: flex; flex-direction: column; background: #efeae2; }
+
+    header { background: #075e54; color: #fff; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; background: #ffb6c1; display: grid; place-items: center; font-size: 20px; overflow: hidden; }
+    .avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .name { font-weight: 600; }
+    .status { font-size: 12px; opacity: .85; }
+
+    #chat { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+    .bubble { max-width: 78%; padding: 7px 10px 5px; border-radius: 10px; font-size: 15px; line-height: 1.35; word-wrap: break-word; box-shadow: 0 1px 1px rgba(0,0,0,.12); }
+    .bubble .time { display: block; text-align: right; font-size: 10px; color: #888; margin-top: 2px; }
+    .bubble img { max-width: 100%; border-radius: 8px; display: block; margin-bottom: 2px; }
+    .ai { background: #fff; align-self: flex-start; border-top-left-radius: 2px; }
+    .user { background: #d9fdd3; align-self: flex-end; border-top-right-radius: 2px; }
+    .error { align-self: center; background: #fde2e2; color: #a33; font-size: 12px; padding: 4px 10px; border-radius: 8px; }
+
+    .typing { display: flex; gap: 4px; padding: 12px 14px; }
+    .typing span { width: 7px; height: 7px; background: #999; border-radius: 50%; animation: bounce 1.2s infinite; }
+    .typing span:nth-child(2) { animation-delay: .2s; }
+    .typing span:nth-child(3) { animation-delay: .4s; }
+    @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-5px); opacity: 1; } }
+
+    #form { display: flex; gap: 8px; padding: 8px; background: #f0f0f0; }
+    #input { flex: 1; padding: 10px 14px; border: none; border-radius: 20px; font-size: 15px; outline: none; }
+    #send { width: 42px; height: 42px; border: none; border-radius: 50%; background: #075e54; color: #fff; font-size: 18px; cursor: pointer; }
+    #send:disabled { opacity: .5; }
   </style>
 </head>
 <body>
-  <h2>Chat dengan Rina</h2>
-  <div id="chat"></div>
-  <div id="form">
-    <input id="input" placeholder="Ketik pesan..." />
-    <button id="send">Kirim</button>
+  <div class="app">
+    <header>
+      <div class="avatar" id="avatar"><img src="images/selfie.png" alt="Rina"></div>
+      <div>
+        <div class="name">Rina</div>
+        <div class="status" id="status">online</div>
+      </div>
+    </header>
+    <div id="chat"></div>
+    <div id="form">
+      <input id="input" placeholder="Ketik pesan..." autocomplete="off" />
+      <button id="send">➤</button>
+    </div>
   </div>
 
   <script>
+    // ====== PENGATURAN (edit di sini) ======
+    const PHOTOS = {
+      makan: "images/makan.webp",
+      kucing: "images/kucing.jpg",
+      selfie: "images/selfie.png",
+      kampus: "images/kampus.webp",
+    };
+    const IDLE_SECONDS = 45;   // diam berapa detik sebelum Rina mulai duluan
+    const MAX_NUDGES = 2;      // maksimal Rina mulai duluan berturut-turut
+    // =======================================
+
     const chat = document.getElementById("chat");
     const input = document.getElementById("input");
     const sendBtn = document.getElementById("send");
-    const history = []; // simpan riwayat obrolan
+    const statusEl = document.getElementById("status");
 
-    function addMessage(text, who) {
+    const history = [];
+    let busy = false;
+    let idleTimer = null;
+    let nudges = 0;
+
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const nowTime = () => new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+
+    function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+
+    function addBubble(text, who, photoSrc) {
       const div = document.createElement("div");
-      div.className = "msg " + who;
-      div.textContent = text;
+      div.className = "bubble " + who;
+      if (photoSrc) {
+        const img = document.createElement("img");
+        img.src = photoSrc;
+        img.onerror = () => img.remove(); // kalau foto tidak ada, abaikan
+        div.appendChild(img);
+      }
+      if (text) div.appendChild(document.createTextNode(text));
+      const t = document.createElement("span");
+      t.className = "time";
+      t.textContent = nowTime();
+      div.appendChild(t);
       chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
+      scrollDown();
+    }
+
+    function showTyping() {
+      const div = document.createElement("div");
+      div.className = "bubble ai typing";
+      div.innerHTML = "<span></span><span></span><span></span>";
+      chat.appendChild(div);
+      statusEl.textContent = "mengetik...";
+      scrollDown();
       return div;
     }
 
-    async function sendMessage() {
-      const text = input.value.trim();
-      if (!text) return;
-      input.value = "";
-      addMessage(text, "user");
-      history.push({ role: "user", content: text });
+    // Tampilkan balasan AI: dipecah per "|||", tiap bagian ada jeda mengetik
+    async function showReply(reply) {
+      const parts = reply.split("|||").map((p) => p.trim()).filter(Boolean);
+      for (const part of parts) {
+        const typing = showTyping();
+        await sleep(Math.min(400 + part.length * 35, 2200));
+        typing.remove();
+        statusEl.textContent = "online";
 
-      const loading = addMessage("Rina lagi mengetik...", "ai");
+        const match = part.match(/\[foto:(\w+)\]/);
+        const photo = match ? PHOTOS[match[1]] : null;
+        const text = part.replace(/\[foto:\w+\]/g, "").trim();
+        addBubble(text, "ai", photo);
+        await sleep(300);
+      }
+    }
+
+    async function askAI() {
+      busy = true;
       sendBtn.disabled = true;
-
+      clearTimeout(idleTimer);
       try {
         const res = await fetch("/api/chat", {
           method: "POST",
@@ -55,17 +135,55 @@
         });
         const data = await res.json();
         if (data.error) throw new Error(data.error);
-        loading.textContent = data.reply;
         history.push({ role: "assistant", content: data.reply });
+        await showReply(data.reply);
       } catch (e) {
-        loading.textContent = "Error: " + e.message;
-        history.pop(); // buang pesan user yang gagal
+        history.pop(); // buang pesan terakhir yang gagal
+        const err = document.createElement("div");
+        err.className = "error";
+        err.textContent = "Error: " + e.message.slice(0, 150);
+        chat.appendChild(err);
+        scrollDown();
       }
+      busy = false;
       sendBtn.disabled = false;
+      startIdleTimer();
+    }
+
+    // Pesan tersembunyi: user tidak melihatnya, hanya AI
+    function hiddenPrompt(text) {
+      history.push({ role: "user", content: "[SISTEM: " + text + "]" });
+      return askAI();
+    }
+
+    function startIdleTimer() {
+      clearTimeout(idleTimer);
+      if (nudges >= MAX_NUDGES) return;
+      idleTimer = setTimeout(() => {
+        if (busy || input.value.trim()) return startIdleTimer();
+        nudges++;
+        hiddenPrompt(
+          "User diam sekitar " + IDLE_SECONDS + " detik. Kamu mulai duluan: tanya sesuatu, cerita hal kecil dari harimu, atau ganti topik. Singkat, natural, jangan menyebut bahwa dia diam."
+        );
+      }, IDLE_SECONDS * 1000);
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text || busy) return;
+      input.value = "";
+      nudges = 0;
+      addBubble(text, "user");
+      history.push({ role: "user", content: text });
+      await askAI();
     }
 
     sendBtn.addEventListener("click", sendMessage);
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
+    input.addEventListener("input", () => { if (!busy) startIdleTimer(); });
+
+    // Rina menyapa duluan saat website dibuka
+    hiddenPrompt("User baru saja membuka chat denganmu. Sapa duluan dengan gayamu, singkat, lalu tanya sesuatu.");
   </script>
 </body>
 </html>
