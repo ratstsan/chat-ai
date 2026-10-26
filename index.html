@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Chat dengan Rina</title>
+  <style>
+    body { font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 16px; }
+    #chat { height: 70vh; overflow-y: auto; border: 1px solid #ccc; border-radius: 8px; padding: 10px; }
+    .msg { margin: 8px 0; padding: 8px 12px; border-radius: 12px; max-width: 80%; }
+    .user { background: #d0e8ff; margin-left: auto; }
+    .ai { background: #eee; }
+    #form { display: flex; gap: 8px; margin-top: 10px; }
+    #input { flex: 1; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h2>Chat dengan Rina</h2>
+  <div id="chat"></div>
+  <div id="form">
+    <input id="input" placeholder="Ketik pesan..." />
+    <button id="send">Kirim</button>
+  </div>
+
+  <script>
+    const chat = document.getElementById("chat");
+    const input = document.getElementById("input");
+    const sendBtn = document.getElementById("send");
+    const history = []; // simpan riwayat obrolan
+
+    function addMessage(text, who) {
+      const div = document.createElement("div");
+      div.className = "msg " + who;
+      div.textContent = text;
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+      return div;
+    }
+
+    async function sendMessage() {
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = "";
+      addMessage(text, "user");
+      history.push({ role: "user", content: text });
+
+      const loading = addMessage("Rina lagi mengetik...", "ai");
+      sendBtn.disabled = true;
+
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history }),
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        loading.textContent = data.reply;
+        history.push({ role: "assistant", content: data.reply });
+      } catch (e) {
+        loading.textContent = "Error: " + e.message;
+        history.pop(); // buang pesan user yang gagal
+      }
+      sendBtn.disabled = false;
+    }
+
+    sendBtn.addEventListener("click", sendMessage);
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") sendMessage(); });
+  </script>
+</body>
+</html>
